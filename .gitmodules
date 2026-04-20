@@ -1,0 +1,4 @@
+[submodule "lib/lvgl"]
+	path = lib/lvgl
+	url = https://github.com/kazkojima/lvgl.git
+	branch = v9.5-waveshare_rp2350_touch_lcd_3.49
