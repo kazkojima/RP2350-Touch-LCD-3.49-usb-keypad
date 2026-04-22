@@ -129,7 +129,7 @@
 #define LV_IMG_CACHE_DEF_SIZE 0
 
 /*Maximum buffer size to allocate for rotation. Only used if software rotation is enabled in the display driver.*/
-#define LV_DISP_ROT_MAX_BUF (20*1024)
+#define LV_DISP_ROT_MAX_BUF (32*1024)
 
 /*-------------
  * GPU
