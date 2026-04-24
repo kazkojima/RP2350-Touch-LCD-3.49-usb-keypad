@@ -1,7 +1,11 @@
 #ifndef KEYS_H
 #define KEYS_H
 
+#ifndef HID_KEY_NONE
 #include "class/hid/hid.h" // HID_KEY_*
+#endif
+#include <stdint.h>
+#include <stddef.h>
 
 struct TouchKey
 {

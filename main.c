@@ -76,38 +76,42 @@ static void touch_screen_init(void) {
 static lv_obj_t *pad_widget = NULL;
 static lv_obj_t *keys_widget[N_KEYS];
 
-#define PAD_WIDTH 170
-#define PAD_HEIGHT 318
+#define PAD_WIDTH 40
+#define PAD_HEIGHT 20
 
 void ui_init(lv_obj_t *parent)
 {
+#if 0
   pad_widget = lv_obj_create(parent);
   lv_obj_set_size(pad_widget, PAD_WIDTH, PAD_HEIGHT);
-  lv_obj_align(pad_widget, LV_ALIGN_BOTTOM_MID, 0, -2);
+  lv_obj_align(pad_widget, LV_ALIGN_TOP_LEFT, 0, 0);
   lv_obj_update_layout(pad_widget);
   lv_obj_set_style_bg_color(pad_widget, lv_palette_main(LV_PALETTE_GREY), 0);
-
+#endif
   for (int i = 0; i < N_KEYS; i++)
     {
       struct TouchKey *k = &touch_keys[i];
       lv_obj_t *btn = lv_button_create(parent);
-      lv_obj_set_size(btn, k->y1-k->y0, k->x1-k->x0);
-      lv_obj_align(btn, LV_ALIGN_TOP_LEFT, k->y0, k->x0);
+      lv_obj_set_size(btn, k->x1-k->x0, k->y1-k->y0);
+      lv_obj_align(btn, LV_ALIGN_TOP_LEFT, k->x0, k->y0);
       lv_obj_t * label = lv_label_create(btn);
       lv_label_set_text(label, k->sym);
+#if 0
       lv_obj_set_style_transform_pivot_x(label, lv_pct(50), LV_PART_MAIN);
       lv_obj_set_style_transform_pivot_y(label, lv_pct(50), LV_PART_MAIN);
       lv_obj_set_style_transform_rotation(label, 900, LV_PART_MAIN);
+#endif
       lv_obj_center(label);
       keys_widget[i] = btn;
     }
 }
 
-void ui_update(void)
+void ui_update_all(void)
 {
-  lv_obj_invalidate(pad_widget);
+  //lv_obj_invalidate(pad_widget);
   for (int i=0; i < N_KEYS; i++)
     lv_obj_invalidate(keys_widget[i]);
+  //lv_obj_invalidate(lv_screen_active());
 }
 
 static lv_indev_t *lv_indev;
@@ -119,8 +123,8 @@ void touch_input_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 
   if (ts_timer > 0)
     {
-      data->point.x = ts_x;
-      data->point.y = ts_y;
+      data->point.y = 172-ts_x;
+      data->point.x = ts_y;
       data->state = LV_INDEV_STATE_PRESSED;
     }
   else
@@ -140,19 +144,15 @@ static void core1_worker()
   lv_indev_set_read_cb(lv_indev, touch_input_read_cb);
 
   ui_init(lv_screen_active());
-  ui_update();
+  lv_sleep_ms(100);
+  ui_update_all();
+  lv_refr_now(NULL);
   lv_task_handler();
 
   while(1)
     {
-      bool update_ui = (ts_timer > 0);
-	
-      if (update_ui)
-	{
-	  // update ui
-	  ui_update();
-	  lv_task_handler();
-	}
+      lv_sleep_ms(5);
+      lv_task_handler();
     }
 }
 
@@ -245,7 +245,7 @@ void hid_task(void)
     {
       if (!has_key)
 	{
-	  key_codes[0] = pos2key(ts_y, ts_x);
+	  key_codes[0] = pos2key(ts_y, 172-ts_x);
 	  // send a keyboard report
 	  send_hid_report(true);
 	  has_key = true;

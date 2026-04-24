@@ -129,7 +129,7 @@
 #define LV_IMG_CACHE_DEF_SIZE 0
 
 /*Maximum buffer size to allocate for rotation. Only used if software rotation is enabled in the display driver.*/
-#define LV_DISP_ROT_MAX_BUF (32*1024)
+#define LV_DISP_ROT_MAX_BUF (64*1024)
 
 /*-------------
  * GPU
@@ -516,7 +516,7 @@ e.g. "stm32f769xx.h" or "stm32f429xx.h"*/
 # define LV_THEME_DEFAULT_DARK 0
 
 /*1: Enable grow on press*/
-# define LV_THEME_DEFAULT_GROW 1
+# define LV_THEME_DEFAULT_GROW 0
 
 /*Default transition time in [ms]*/
 # define LV_THEME_DEFAULT_TRANSITION_TIME 80
