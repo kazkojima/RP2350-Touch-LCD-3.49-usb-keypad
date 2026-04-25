@@ -17,7 +17,7 @@ struct TouchKey
   const char *sym;
 };
 
-#define N_KEYS 5
+#define N_KEYS 4
 
 extern struct TouchKey touch_keys[];
 

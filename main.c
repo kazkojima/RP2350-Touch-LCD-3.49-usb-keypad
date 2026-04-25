@@ -49,11 +49,6 @@ static uint16_t ts_y;
 static lv_indev_state_t ts_act;
 static int ts_timer = 0;
 
-bool mouse_p(uint16_t x, uint16_t y)
-{
-  return y > 320;
-}
-
 static void touch_callback(uint gpio, uint32_t events)
 {
   if (gpio == TOUCH_INT_PIN)
@@ -73,21 +68,38 @@ static void touch_screen_init(void) {
     DEV_IRQ_SET(TOUCH_INT_PIN, GPIO_IRQ_EDGE_FALL, &touch_callback);
 }
 
-static lv_obj_t *pad_widget = NULL;
 static lv_obj_t *keys_widget[N_KEYS];
+static lv_obj_t *tenkey_widget = NULL;
 
-#define PAD_WIDTH 40
-#define PAD_HEIGHT 20
+static const char * btnm_map[] = {
+  "1", "2", "3", "4", "5", "\n",
+  "6", "7", "8", "9", "0", ""
+};
+
+static uint32_t tenkey_id;
+static bool tenkey_pressed =false;
+
+static void tenkey_event_handler(lv_event_t *e)
+{
+  lv_event_code_t code = lv_event_get_code(e);
+  lv_obj_t * obj = lv_event_get_target_obj(e);
+  if (code == LV_EVENT_VALUE_CHANGED) {
+    uint32_t id = lv_buttonmatrix_get_selected_button(obj);
+    const char * txt = lv_buttonmatrix_get_button_text(obj, id);
+    tenkey_id = *txt - '0';
+    tenkey_pressed = true;
+  }
+}
 
 void ui_init(lv_obj_t *parent)
 {
-#if 0
-  pad_widget = lv_obj_create(parent);
-  lv_obj_set_size(pad_widget, PAD_WIDTH, PAD_HEIGHT);
-  lv_obj_align(pad_widget, LV_ALIGN_TOP_LEFT, 0, 0);
-  lv_obj_update_layout(pad_widget);
-  lv_obj_set_style_bg_color(pad_widget, lv_palette_main(LV_PALETTE_GREY), 0);
-#endif
+  lv_obj_t * btnm = lv_buttonmatrix_create(parent);
+  tenkey_widget = btnm;
+  lv_buttonmatrix_set_map(btnm, btnm_map);
+  lv_obj_set_size(btnm, 390, 160);
+  lv_obj_align(btnm, LV_ALIGN_TOP_LEFT, 4, 4);
+  lv_obj_add_event_cb(btnm, tenkey_event_handler, LV_EVENT_ALL, NULL);
+
   for (int i = 0; i < N_KEYS; i++)
     {
       struct TouchKey *k = &touch_keys[i];
@@ -108,7 +120,7 @@ void ui_init(lv_obj_t *parent)
 
 void ui_update_all(void)
 {
-  //lv_obj_invalidate(pad_widget);
+  lv_obj_invalidate(tenkey_widget);
   for (int i=0; i < N_KEYS; i++)
     lv_obj_invalidate(keys_widget[i]);
   //lv_obj_invalidate(lv_screen_active());
@@ -222,8 +234,6 @@ void hid_task(void)
   const uint32_t interval_ms = 10;
   static uint32_t last_ms = 0;
   static bool has_key = false;
-  static int16_t prev_x = -1;
-  static int16_t prev_y = -1;
 
   // Ensure the HID interface is ready to send a new report
   if (!tud_hid_ready())
@@ -241,37 +251,22 @@ void hid_task(void)
       return;
     }
 
-  if (!mouse_p(ts_x, ts_y))
+if (!has_key)
     {
-      if (!has_key)
+      if (tenkey_pressed)
+	{
+	  key_codes[0] = (tenkey_id == 0)?HID_KEY_0:HID_KEY_1+tenkey_id-1;
+	  tenkey_pressed = false;
+	  send_hid_report(true);
+	  has_key = true;
+	}
+      else if (pos2key(ts_y, 172-ts_x) != HID_KEY_NONE)
 	{
 	  key_codes[0] = pos2key(ts_y, 172-ts_x);
 	  // send a keyboard report
 	  send_hid_report(true);
 	  has_key = true;
 	}
-    }
-  else
-    {
-      int16_t x = (int16_t)ts_y;
-      int16_t y = (int16_t)(172-ts_x);
-      //ts_act = LV_INDEV_STATE_RELEASED;
- 
-      if (prev_x != -1 && prev_y != -1)
-	{
-	  // Calculate relative movement
-	  int16_t dx = x - prev_x;
-	  int16_t dy = y - prev_y;
-
-	  // Send mouse report if movement occurred
-	  // HID relative mouse values are signed 8-bit (-127 to 127)
-	  if (dx != 0 || dy != 0)
-	    {
-               tud_hid_mouse_report(REPORT_ID_MOUSE, 0x00, (int8_t)dx, (int8_t)dy, 0, 0);
-            }
-        }
-      prev_x = x;
-      prev_y = y;
     }
 
   if (to_ms_since_boot(get_absolute_time()) - last_ms > interval_ms)
@@ -285,10 +280,6 @@ void hid_task(void)
     {
       ts_act = LV_INDEV_STATE_RELEASED;
       DEV_Digital_Write(12, 0);
-
-      // Reset tracking when finger is lifted
-      prev_x = -1;
-      prev_y = -1;
 
       if (has_key)
 	{
