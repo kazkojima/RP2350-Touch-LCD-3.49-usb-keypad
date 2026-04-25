@@ -42,7 +42,7 @@
 #define PIN_PWR_EN  37
 #define PIN_RST     34
 
-#define WAIT_TIME() for(int i=0;i<2;i++) __asm__ volatile("nop");
+#define WAIT_TIME() for(int i=0;i<8;i++) __asm__ volatile("nop");
 
 typedef struct pio_qspi {
     PIO pio;

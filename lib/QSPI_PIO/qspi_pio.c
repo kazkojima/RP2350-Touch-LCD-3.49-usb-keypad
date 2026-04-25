@@ -186,7 +186,7 @@ void QSPI_REGISTER_Write(pio_qspi_t qspi, uint32_t addr){
     QSPI_DATA_Write(qspi,0x00);
     QSPI_DATA_Write(qspi,addr);
     QSPI_DATA_Write(qspi,0x00);
-    // WAIT_TIME();
+    WAIT_TIME();
 }
 
 /******************************************************************************
@@ -203,5 +203,5 @@ void QSPI_Pixel_Write(pio_qspi_t qspi, uint32_t addr){
     QSPI_DATA_Write(qspi,0x00);
     QSPI_DATA_Write(qspi,addr);
     QSPI_DATA_Write(qspi,0x00);
-    // WAIT_TIME();
+    WAIT_TIME();
 }
