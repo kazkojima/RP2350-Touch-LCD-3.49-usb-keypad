@@ -23,6 +23,9 @@
  *
  */
 
+// This is based on pico-examples/usb/device/dev_hid_composite/main.c
+//  in https://github.com/raspberrypi/pico-examples.git.
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -37,8 +40,11 @@
 
 #include "lvgl.h"
 #include "DEV_Config.h"
+#include "LCD_3in49.h"
 #include "Touch.h"
 
+const int DEBUG_LED = 12;
+#define ALLOW_DEBUG_LED (DEBUG_LED >= 0)
 
 uint8_t key_codes[6] = {0};
 void hid_task(void);
@@ -47,7 +53,7 @@ void hid_task(void);
 static uint16_t ts_x;
 static uint16_t ts_y;
 static lv_indev_state_t ts_act;
-static int ts_timer = 0;
+static bool indev_done = false;
 
 static void touch_callback(uint gpio, uint32_t events)
 {
@@ -56,10 +62,10 @@ static void touch_callback(uint gpio, uint32_t events)
         Touch_Read_State();
 	ts_x = TOUCH.Point1_x;
         ts_y = TOUCH.Point1_y;
-	//key_codes[0] = pos2key(ts_y, ts_x);
 	ts_act = LV_INDEV_STATE_PRESSED;
-	ts_timer = 10;
-	DEV_Digital_Write(12, 1);
+	indev_done = false;
+	if (ALLOW_DEBUG_LED)
+	  DEV_Digital_Write(DEBUG_LED, 1);
     }
 }
 
@@ -68,8 +74,20 @@ static void touch_screen_init(void) {
     DEV_IRQ_SET(TOUCH_INT_PIN, GPIO_IRQ_EDGE_FALL, &touch_callback);
 }
 
-static lv_obj_t *keys_widget[N_KEYS];
+// Ten Key and action keys
+
+#define N_KEYS 4
+static lv_obj_t *actkey_widgets[N_KEYS];
 static lv_obj_t *tenkey_widget = NULL;
+
+#define KEYAREA(x,y,w,h) (x),(y),((x)+(w)),((y)+(h))
+
+struct TouchKey actkeys[N_KEYS] = {
+  {KEYAREA(412,18,66,58), HID_KEY_BACKSPACE, LV_SYMBOL_BACKSPACE},
+  {KEYAREA(412,82,66,78), HID_KEY_ENTER, LV_SYMBOL_NEW_LINE},
+  {KEYAREA(500,18,66,66), HID_KEY_ARROW_UP, LV_SYMBOL_UP},
+  {KEYAREA(500,90,66,66), HID_KEY_ARROW_DOWN, LV_SYMBOL_DOWN},
+};
 
 static const char * btnm_map[] = {
   "1", "2", "3", "4", "5", "\n",
@@ -91,6 +109,26 @@ static void tenkey_event_handler(lv_event_t *e)
   }
 }
 
+static uint32_t actkey_id;
+static bool actkey_pressed = false;
+
+static void actkey_event_handler(lv_event_t *e)
+{
+  lv_event_code_t code = lv_event_get_code(e);
+  lv_obj_t *obj = lv_event_get_target_obj(e);
+  if (code == LV_EVENT_CLICKED) {
+    for (int i=0; i < N_KEYS; i++)
+      {
+	if (obj == actkey_widgets[i])
+	  {
+	    actkey_id = actkeys[i].key;
+	    actkey_pressed = true;
+	    return;
+	  }
+      }
+  }
+}
+
 void ui_init(lv_obj_t *parent)
 {
   lv_obj_t * btnm = lv_buttonmatrix_create(parent);
@@ -98,23 +136,20 @@ void ui_init(lv_obj_t *parent)
   lv_buttonmatrix_set_map(btnm, btnm_map);
   lv_obj_set_size(btnm, 390, 160);
   lv_obj_align(btnm, LV_ALIGN_TOP_LEFT, 4, 4);
+  //lv_obj_set_style_bg_color(btnm, lv_palette_main(LV_PALETTE_BLUE), LV_PART_ITEMS);
   lv_obj_add_event_cb(btnm, tenkey_event_handler, LV_EVENT_ALL, NULL);
 
   for (int i = 0; i < N_KEYS; i++)
     {
-      struct TouchKey *k = &touch_keys[i];
+      struct TouchKey *k = &actkeys[i];
       lv_obj_t *btn = lv_button_create(parent);
       lv_obj_set_size(btn, k->x1-k->x0, k->y1-k->y0);
       lv_obj_align(btn, LV_ALIGN_TOP_LEFT, k->x0, k->y0);
+      lv_obj_add_event_cb(btn, actkey_event_handler, LV_EVENT_ALL, NULL);
       lv_obj_t * label = lv_label_create(btn);
       lv_label_set_text(label, k->sym);
-#if 0
-      lv_obj_set_style_transform_pivot_x(label, lv_pct(50), LV_PART_MAIN);
-      lv_obj_set_style_transform_pivot_y(label, lv_pct(50), LV_PART_MAIN);
-      lv_obj_set_style_transform_rotation(label, 900, LV_PART_MAIN);
-#endif
       lv_obj_center(label);
-      keys_widget[i] = btn;
+      actkey_widgets[i] = btn;
     }
 }
 
@@ -122,7 +157,7 @@ void ui_update_all(void)
 {
   lv_obj_invalidate(tenkey_widget);
   for (int i=0; i < N_KEYS; i++)
-    lv_obj_invalidate(keys_widget[i]);
+    lv_obj_invalidate(actkey_widgets[i]);
   //lv_obj_invalidate(lv_screen_active());
 }
 
@@ -133,9 +168,10 @@ void touch_input_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
   if (indev == NULL)
     return;
 
-  if (ts_timer > 0)
+  if (ts_act == LV_INDEV_STATE_PRESSED)
     {
-      data->point.y = 172-ts_x;
+      // Convert LCD coordinate to display cordinate
+      data->point.y = LCD_3IN49_WIDTH - ts_x;
       data->point.x = ts_y;
       data->state = LV_INDEV_STATE_PRESSED;
     }
@@ -143,6 +179,7 @@ void touch_input_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     {
       data->state = LV_INDEV_STATE_RELEASED;
     }
+  indev_done = true;
 }
 
 extern void lcd_3in49_lvgl_init(void);
@@ -165,6 +202,12 @@ static void core1_worker()
     {
       lv_sleep_ms(5);
       lv_task_handler();
+      if (indev_done)
+	{
+	  ts_act = LV_INDEV_STATE_RELEASED;
+	  if (ALLOW_DEBUG_LED)
+	    DEV_Digital_Write(DEBUG_LED, 0);
+	}
     }
 }
 
@@ -174,14 +217,13 @@ int main(void)
   if (DEV_Module_Init() != 0)
     return -1;
 
-  DEV_GPIO_Mode(12, GPIO_OUT);
-  DEV_Digital_Write(12, 0);
-  DEV_GPIO_Mode(13, GPIO_OUT);
-  DEV_Digital_Write(13, 0);
+  if (ALLOW_DEBUG_LED)
+    {
+      DEV_GPIO_Mode(12, GPIO_OUT);
+      DEV_Digital_Write(12, 0);
+    }
 
   touch_screen_init();
-
-  keyboard_init();
 
   tusb_init();
 
@@ -189,9 +231,7 @@ int main(void)
 
   while (1)
     {
-      //DEV_Digital_Write(12, 1);
       tud_task();
-      //DEV_Digital_Write(12, 0);
       hid_task();
     }
 
@@ -231,7 +271,7 @@ static void send_hid_report(bool keys_pressed)
 
 void hid_task(void)
 {
-  const uint32_t interval_ms = 10;
+  const uint32_t interval_ms = 100;
   static uint32_t last_ms = 0;
   static bool has_key = false;
 
@@ -239,8 +279,8 @@ void hid_task(void)
   if (!tud_hid_ready())
     return;
 
-  if (ts_act != LV_INDEV_STATE_PRESSED)
-    return;
+  //  if (ts_act != LV_INDEV_STATE_PRESSED)
+  //    return;
   
   // Remote wakeup
   if (tud_suspended())
@@ -251,7 +291,7 @@ void hid_task(void)
       return;
     }
 
-if (!has_key)
+  if (!has_key)
     {
       if (tenkey_pressed)
 	{
@@ -260,9 +300,10 @@ if (!has_key)
 	  send_hid_report(true);
 	  has_key = true;
 	}
-      else if (pos2key(ts_y, 172-ts_x) != HID_KEY_NONE)
+      else if (actkey_pressed)
 	{
-	  key_codes[0] = pos2key(ts_y, 172-ts_x);
+	  key_codes[0] = actkey_id;
+	  actkey_pressed = false;
 	  // send a keyboard report
 	  send_hid_report(true);
 	  has_key = true;
@@ -272,15 +313,6 @@ if (!has_key)
   if (to_ms_since_boot(get_absolute_time()) - last_ms > interval_ms)
     {
       last_ms = to_ms_since_boot(get_absolute_time()) ;
-      if (ts_timer > 0)
-	ts_timer = ts_timer - 1;
-    }
-
-  if (ts_timer <= 0)
-    {
-      ts_act = LV_INDEV_STATE_RELEASED;
-      DEV_Digital_Write(12, 0);
-
       if (has_key)
 	{
 	  tud_hid_keyboard_report(REPORT_ID_KEYBOARD, 0, NULL);

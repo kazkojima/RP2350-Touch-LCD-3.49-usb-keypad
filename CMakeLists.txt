@@ -50,7 +50,7 @@ include_directories(./examples/inc)
 
 # PICO_CONFIG: PICO_XOSC_STARTUP_DELAY_MULTIPLIER, Multiplier to lengthen xosc startup delay to accommodate slow-starting oscillators, type=int, min=1, default=1, group=hardware_xosc
 
-add_executable(RP2350-Touch-LCD-3.49-LVGL main.c keyboard.c lcd_3in49_lvgl_init.c usb_descriptors.c)
+add_executable(RP2350-Touch-LCD-3.49-LVGL main.c lcd_3in49_lvgl_init.c usb_descriptors.c)
 
 pico_generate_pio_header(RP2350-Touch-LCD-3.49-LVGL ${CMAKE_CURRENT_LIST_DIR}/lib/QSPI_PIO/qspi.pio
                         OUTPUT_DIR ${CMAKE_CURRENT_LIST_DIR}/lib/QSPI_PIO)

@@ -17,12 +17,4 @@ struct TouchKey
   const char *sym;
 };
 
-#define N_KEYS 4
-
-extern struct TouchKey touch_keys[];
-
-uint8_t pos2key(int x, int y);
-void keyboard_init(void);
-
-
 #endif /* KEYS_H */
