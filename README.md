@@ -2,13 +2,15 @@
 
 (This README is Assisted-by GEMINI CODE ASSIST)
 
-This repository contains a tiny example project that turns Waveshare RP2350-Touch-LCD-3.49 which is an RP2350-based development board with a 3.49-inch touch LCD into a USB HID numeric keypad (tenkey).
+This repository contains a tiny example project that turns [Waveshare RP2350-Touch-LCD-3.49](https://www.waveshare.com/wiki/RP2350-Touch-LCD-3.49) which is an RP2350-based development board with a 3.49-inch touch LCD into a USB HID numeric keypad (tenkey).
 
 <img src="https://github.com/kazkojima/RP2350-Touch-LCD-3.49-usb-keypad/blob/junkyard/images/tenkey-emu.png" alt="Testing tenkey example" width="640">
 
 It uses the **LVGL (Light and Versatile Graphics Library)** for the user interface and the **Pico SDK**'s USB stack (TinyUSB) for keyboard emulation.
 
 The LCD on Waveshare RP2350-Touch-LCD-3.49 is portrait-oriented and the LCD controller AXS15231B does not support hardware-based screen rotation. This means that software-based rotation is required for landscape-oriented applications like this example.
+
+The USB part is based on [the HID device example of pico-example](https://github.com/raspberrypi/pico-examples/tree/master/usb/device/dev_hid_composite). The files in lib directory except in the LVGL-9.5 tree come from [LVGL Demo in https://www.waveshare.com/wiki/RP2350-Touch-LCD-3.49](https://files.waveshare.com/wiki/RP2350-Touch-LCD-3.49/RP2350-Touch-LCD-3.49-LVGL.zip).
 
 ## Key Features
 
