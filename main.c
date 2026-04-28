@@ -43,6 +43,9 @@
 #include "LCD_3in49.h"
 #include "Touch.h"
 
+#define ENABLE_QUIET_MODE 1
+#define SLEEP_QUIET 60
+
 const int DEBUG_LED = 12;
 #define ALLOW_DEBUG_LED (DEBUG_LED >= 0)
 
@@ -233,8 +236,9 @@ int main(void)
   uint32_t last_time =  to_ms_since_boot(get_absolute_time());
   while (1)
     {
+#if ENABLE_QUIET_MODE
       uint32_t now = to_ms_since_boot(get_absolute_time());
-      bool timer_expired = (now - last_time > 60*1000); // 60sec
+      bool timer_expired = (now - last_time > QUIET_AFTER*1000);
 
       if (tenkey_pressed || actkey_pressed)
 	last_time = now;
@@ -249,7 +253,7 @@ int main(void)
 	  quiet_mode = false;
 	  DEV_SET_PWM(60);
 	}
-
+#endif
       tud_task();
       hid_task(!quiet_mode);
     }

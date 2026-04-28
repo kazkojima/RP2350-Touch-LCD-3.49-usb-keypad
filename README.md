@@ -64,5 +64,15 @@ If you have `picotool` installed, you can flash the device directly:
 picotool load RP2350-Touch-LCD-3.49-LVGL.uf2 -x
 ```
 
-## UI Configuration
+## Hints for Configuration
+
+### Screen orientation
 The display uses software rotation. You can adjust the rotation angle within lcd_3in49_lvgl_init.c:disp_flush_cb function if your hardware mounting requires a different orientation.
+
+### Quiet mode
+If there is no key activity for 60 seconds, the device will enter quiet mode. In quiet mode, the screen goes dark and no key action sends to the host. Press the power button to wake it up. This behavior is controlled with:
+```
+#define ENABLE_QUIET_MODE 1
+#define QUIET_AFTER 60
+```
+in main.c.
