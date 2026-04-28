@@ -47,7 +47,7 @@ const int DEBUG_LED = 12;
 #define ALLOW_DEBUG_LED (DEBUG_LED >= 0)
 
 uint8_t key_codes[6] = {0};
-void hid_task(void);
+void hid_task(bool quiet);
 
 // Touch screen
 static uint16_t ts_x;
@@ -229,10 +229,29 @@ int main(void)
 
   multicore_launch_core1(core1_worker);
 
+  bool quiet_mode = false;
+  uint32_t last_time =  to_ms_since_boot(get_absolute_time());
   while (1)
     {
+      uint32_t now = to_ms_since_boot(get_absolute_time());
+      bool timer_expired = (now - last_time > 60*1000); // 60sec
+
+      if (tenkey_pressed || actkey_pressed)
+	last_time = now;
+      if (!quiet_mode && timer_expired)
+	{
+	  quiet_mode = true;
+	  DEV_SET_PWM(40);
+	}
+      if (DEV_Digital_Read(SYS_OUT) == 0)
+	{
+	  last_time = now;
+	  quiet_mode = false;
+	  DEV_SET_PWM(60);
+	}
+
       tud_task();
-      hid_task();
+      hid_task(!quiet_mode);
     }
 
   return 0;
@@ -269,7 +288,7 @@ static void send_hid_report(bool keys_pressed)
     }
 }
 
-void hid_task(void)
+void hid_task(bool quiet)
 {
   const uint32_t interval_ms = 100;
   static uint32_t last_ms = 0;
@@ -297,7 +316,7 @@ void hid_task(void)
 	{
 	  key_codes[0] = (tenkey_id == 0)?HID_KEY_0:HID_KEY_1+tenkey_id-1;
 	  tenkey_pressed = false;
-	  send_hid_report(true);
+	  send_hid_report(quiet);
 	  has_key = true;
 	}
       else if (actkey_pressed)
@@ -305,7 +324,7 @@ void hid_task(void)
 	  key_codes[0] = actkey_id;
 	  actkey_pressed = false;
 	  // send a keyboard report
-	  send_hid_report(true);
+	  send_hid_report(quiet);
 	  has_key = true;
 	}
     }
