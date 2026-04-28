@@ -44,7 +44,7 @@
 #include "Touch.h"
 
 #define ENABLE_QUIET_MODE 1
-#define SLEEP_QUIET 60
+#define QUIET_AFTER 60
 
 const int DEBUG_LED = 12;
 #define ALLOW_DEBUG_LED (DEBUG_LED >= 0)
@@ -119,7 +119,7 @@ static void actkey_event_handler(lv_event_t *e)
 {
   lv_event_code_t code = lv_event_get_code(e);
   lv_obj_t *obj = lv_event_get_target_obj(e);
-  if (code == LV_EVENT_CLICKED) {
+  if (code == LV_EVENT_PRESSED/*CLICKED*/) {
     for (int i=0; i < N_KEYS; i++)
       {
 	if (obj == actkey_widgets[i])
@@ -208,6 +208,7 @@ static void core1_worker()
       if (indev_done)
 	{
 	  ts_act = LV_INDEV_STATE_RELEASED;
+	  //lv_obj_invalidate(tenkey_widget);
 	  if (ALLOW_DEBUG_LED)
 	    DEV_Digital_Write(DEBUG_LED, 0);
 	}
