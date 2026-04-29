@@ -119,7 +119,7 @@ static void actkey_event_handler(lv_event_t *e)
 {
   lv_event_code_t code = lv_event_get_code(e);
   lv_obj_t *obj = lv_event_get_target_obj(e);
-  if (code == LV_EVENT_PRESSED/*CLICKED*/) {
+  if (code == LV_EVENT_CLICKED) {
     for (int i=0; i < N_KEYS; i++)
       {
 	if (obj == actkey_widgets[i])
@@ -140,6 +140,7 @@ void ui_init(lv_obj_t *parent)
   lv_obj_set_size(btnm, 390, 160);
   lv_obj_align(btnm, LV_ALIGN_TOP_LEFT, 4, 4);
   //lv_obj_set_style_bg_color(btnm, lv_palette_main(LV_PALETTE_BLUE), LV_PART_ITEMS);
+  lv_buttonmatrix_set_button_ctrl_all(btnm, LV_BUTTONMATRIX_CTRL_CLICK_TRIG|LV_BUTTONMATRIX_CTRL_NO_REPEAT);
   lv_obj_add_event_cb(btnm, tenkey_event_handler, LV_EVENT_ALL, NULL);
 
   for (int i = 0; i < N_KEYS; i++)
@@ -196,10 +197,7 @@ static void core1_worker()
   lv_indev_set_read_cb(lv_indev, touch_input_read_cb);
 
   ui_init(lv_screen_active());
-  lv_sleep_ms(100);
   ui_update_all();
-  lv_refr_now(NULL);
-  lv_task_handler();
 
   while(1)
     {
@@ -208,7 +206,9 @@ static void core1_worker()
       if (indev_done)
 	{
 	  ts_act = LV_INDEV_STATE_RELEASED;
-	  //lv_obj_invalidate(tenkey_widget);
+	  // Sometimes button and button matrix widgets are refreshed only partially.
+	  // Make sure that they are updated here anyway.
+	  ui_update_all();
 	  if (ALLOW_DEBUG_LED)
 	    DEV_Digital_Write(DEBUG_LED, 0);
 	}
