@@ -47,15 +47,26 @@
 #include "Touch.h"
 #include "sdc-spi.h"
 
+// if 1, enable quiet mode after QUIET_AFTER sec with no key activities
 #define ENABLE_QUIET_MODE 1
 #define QUIET_AFTER 60
 
 const int DEBUG_LED = -1; // 14
 #define ALLOW_DEBUG_LED (DEBUG_LED >= 0)
 
+// if 0, disable one time macro key function
+#define ENABLE_MACRO_KEY 1
+
 // SDC objects
 static bool sd_initialized = false;
 static uint8_t secbuf[512];
+
+// macro key data offset in sector 0
+// For macro key, sector 0 of sdcard, normally mbr, is used as a "physical key".
+// SECTOR_DATA_OFS is the start offset of the key bytes in sector 0.
+// Those bytes are xor'ed with another key bytes in the flash page at
+// __device_key__[] which is allocated at the end of the flash memory.
+#define SECTOR_DATA_OFS 32
 
 // Keyboard hid
 uint8_t key_codes[6] = {0};
@@ -260,6 +271,7 @@ static void core1_worker()
 }
 
 // Macro key
+#if ENABLE_MACRO_KEY
 #define DEVKEY_LENGTH 32
 static bool macro_mode = false;
 #define MAX_MACRO_LENGTH DEVKEY_LENGTH
@@ -282,6 +294,7 @@ static inline uint8_t asc2hidcode(char c, hid_keyboard_modifier_bm_t *m)
 
 // start address of key code section on flash
 extern uint8_t __device_key__[];
+#endif
 
 /*------------- MAIN -------------*/
 int main(void)
@@ -302,7 +315,9 @@ int main(void)
       DEV_Digital_Write(DEBUG_LED, 0);
     }
 
-  sd_initialized = sd_init_spi_mode();
+#if ENABLE_MACRO_KEY
+    sd_initialized = sd_init_spi_mode();
+#endif
 
   touch_screen_init();
 
@@ -325,19 +340,20 @@ int main(void)
 	  quiet_mode = true;
 	  DEV_SET_PWM(40);
 	}
-      if (macrokey_pressed)
+       if (DEV_Digital_Read(SYS_OUT) == 0)
+	{
+	  last_time = now;
+	  quiet_mode = false;
+	  DEV_SET_PWM(60);
+	}
+#endif
+#if ENABLE_MACRO_KEY
+       if (macrokey_pressed)
 	{
 	  macrokey_pressed = false;
 	  if (sd_initialized && sd_read_block(0, secbuf)) {
-#if 0
-	    //DEV_Digital_Write(DEBUG_LED, 1);
-	    printf("sector read ok\n");
-	    for (int i=0; i < 8; i++)
-	      printf("%02x ", secbuf[32+i]);
-	    printf("\n");
-#endif
 	    for (int i = 0; i < DEVKEY_LENGTH; i++)
-	      macro_codes[i] = secbuf[32+i] ^ __device_key__[i];
+	      macro_codes[i] = secbuf[SECTOR_DATA_OFS+i] ^ __device_key__[i];
 	    //printf("macro len %d\n", macro_codes[0]);
 	    // Erase sector buffer
 	    memset(secbuf, 0, sizeof(secbuf));
@@ -350,12 +366,6 @@ int main(void)
 	  }
 	  sd_initialized = false;
 	  sd_deselect();
-	}
-      if (DEV_Digital_Read(SYS_OUT) == 0)
-	{
-	  last_time = now;
-	  quiet_mode = false;
-	  DEV_SET_PWM(60);
 	}
 #endif
       tud_task();
@@ -420,6 +430,7 @@ void hid_task(bool quiet)
 
   if (!has_key)
     {
+#if ENABLE_MACRO_KEY
       if (macro_mode)
 	{
 	  if (macro_index <= macro_length)
@@ -439,7 +450,9 @@ void hid_task(bool quiet)
 	      memset(macro_codes, 0, sizeof(macro_codes));
 	    }
 	}
-      else if (tenkey_pressed)
+      else
+#endif
+      if (tenkey_pressed)
 	{
 	  key_codes[0] = (tenkey_id == 0)?HID_KEY_0:HID_KEY_1+tenkey_id-1;
 	  key_modifier = 0;
