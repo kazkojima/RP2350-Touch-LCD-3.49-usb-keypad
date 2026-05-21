@@ -30,8 +30,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "pico/stdio.h"
 #include "pico/multicore.h"
 #include "hardware/clocks.h"
+
+#include "hardware/spi.h"
 
 #include "tusb.h"
 #include "usb_descriptors.h"
@@ -42,14 +45,21 @@
 #include "DEV_Config.h"
 #include "LCD_3in49.h"
 #include "Touch.h"
+#include "sdc-spi.h"
 
 #define ENABLE_QUIET_MODE 1
 #define QUIET_AFTER 60
 
-const int DEBUG_LED = 12;
+const int DEBUG_LED = -1; // 14
 #define ALLOW_DEBUG_LED (DEBUG_LED >= 0)
 
+// SDC objects
+static bool sd_initialized = false;
+static uint8_t secbuf[512];
+
+// Keyboard hid
 uint8_t key_codes[6] = {0};
+hid_keyboard_modifier_bm_t key_modifier;
 void hid_task(bool quiet);
 
 // Touch screen
@@ -82,15 +92,18 @@ static void touch_screen_init(void) {
 #define N_KEYS 4
 static lv_obj_t *actkey_widgets[N_KEYS];
 static lv_obj_t *tenkey_widget = NULL;
+static lv_obj_t *macrokey_widget = NULL;
 
 #define KEYAREA(x,y,w,h) (x),(y),((x)+(w)),((y)+(h))
 
 struct TouchKey actkeys[N_KEYS] = {
-  {KEYAREA(412,18,66,58), HID_KEY_BACKSPACE, LV_SYMBOL_BACKSPACE},
-  {KEYAREA(412,82,66,78), HID_KEY_ENTER, LV_SYMBOL_NEW_LINE},
-  {KEYAREA(500,18,66,66), HID_KEY_ARROW_UP, LV_SYMBOL_UP},
-  {KEYAREA(500,90,66,66), HID_KEY_ARROW_DOWN, LV_SYMBOL_DOWN},
+  {KEYAREA(408,18,66,58), HID_KEY_BACKSPACE, LV_SYMBOL_BACKSPACE},
+  {KEYAREA(408,82,66,78), HID_KEY_ENTER, LV_SYMBOL_NEW_LINE},
+  {KEYAREA(488,18,66,66), HID_KEY_ARROW_UP, LV_SYMBOL_UP},
+  {KEYAREA(488,90,66,66), HID_KEY_ARROW_DOWN, LV_SYMBOL_DOWN},
 };
+
+struct TouchKey macrokey = {KEYAREA(568,18,66,66), HID_KEY_NONE, LV_SYMBOL_UPLOAD};
 
 static const char * btnm_map[] = {
   "1", "2", "3", "4", "5", "\n",
@@ -132,6 +145,21 @@ static void actkey_event_handler(lv_event_t *e)
   }
 }
 
+static bool macrokey_pressed = false;
+
+static void macrokey_event_handler(lv_event_t *e)
+{
+  lv_event_code_t code = lv_event_get_code(e);
+  lv_obj_t *obj = lv_event_get_target_obj(e);
+  if (code == LV_EVENT_CLICKED) {
+    if (obj == macrokey_widget)
+      {
+	macrokey_pressed = true;
+	return;
+      }
+  }
+}
+
 void ui_init(lv_obj_t *parent)
 {
   lv_obj_t * btnm = lv_buttonmatrix_create(parent);
@@ -150,11 +178,21 @@ void ui_init(lv_obj_t *parent)
       lv_obj_set_size(btn, k->x1-k->x0, k->y1-k->y0);
       lv_obj_align(btn, LV_ALIGN_TOP_LEFT, k->x0, k->y0);
       lv_obj_add_event_cb(btn, actkey_event_handler, LV_EVENT_ALL, NULL);
-      lv_obj_t * label = lv_label_create(btn);
+      lv_obj_t *label = lv_label_create(btn);
       lv_label_set_text(label, k->sym);
       lv_obj_center(label);
       actkey_widgets[i] = btn;
     }
+
+  struct TouchKey *k = &macrokey;
+  lv_obj_t *btn = lv_button_create(parent);
+  lv_obj_set_size(btn, k->x1-k->x0, k->y1-k->y0);
+  lv_obj_align(btn, LV_ALIGN_TOP_LEFT, k->x0, k->y0);
+  lv_obj_add_event_cb(btn, macrokey_event_handler, LV_EVENT_ALL, NULL);
+  lv_obj_t *label = lv_label_create(btn);
+  lv_label_set_text(label, k->sym);
+  lv_obj_center(label);
+  macrokey_widget = btn;
 }
 
 void ui_update_all(void)
@@ -162,6 +200,7 @@ void ui_update_all(void)
   lv_obj_invalidate(tenkey_widget);
   for (int i=0; i < N_KEYS; i++)
     lv_obj_invalidate(actkey_widgets[i]);
+  lv_obj_invalidate(macrokey_widget);
   //lv_obj_invalidate(lv_screen_active());
 }
 
@@ -212,8 +251,37 @@ static void core1_worker()
 	  if (ALLOW_DEBUG_LED)
 	    DEV_Digital_Write(DEBUG_LED, 0);
 	}
+      if (!sd_initialized)
+	{
+	  if (!lv_obj_has_state(macrokey_widget, LV_STATE_DISABLED))
+	    lv_obj_add_state(macrokey_widget, LV_STATE_DISABLED);
+	}
     }
 }
+
+// Macro key
+#define DEVKEY_LENGTH 32
+static bool macro_mode = false;
+#define MAX_MACRO_LENGTH DEVKEY_LENGTH
+
+static int macro_length = 0;
+static uint8_t macro_codes[MAX_MACRO_LENGTH]; // = { 6, 'H', 'e', 'l', 'l', 'o', '\n', };
+static int macro_index = 0;
+
+// simple ascii to hid key code converter
+uint8_t const conv_table[128][2] =  { HID_ASCII_TO_KEYCODE };
+
+static inline uint8_t asc2hidcode(char c, hid_keyboard_modifier_bm_t *m)
+{
+  if (conv_table[c][0])
+    *m = KEYBOARD_MODIFIER_LEFTSHIFT;
+  else
+    *m = 0;
+  return conv_table[c][1];
+}
+
+// start address of key code section on flash
+extern uint8_t __device_key__[];
 
 /*------------- MAIN -------------*/
 int main(void)
@@ -221,11 +289,20 @@ int main(void)
   if (DEV_Module_Init() != 0)
     return -1;
 
+#if 0
+  printf("device key address %08x\n", __device_key__);
+  for (int i=0; i < 8; i++)
+    printf("%02x ", __device_key__[i]);
+  printf("\n");
+#endif
+
   if (ALLOW_DEBUG_LED)
     {
-      DEV_GPIO_Mode(12, GPIO_OUT);
-      DEV_Digital_Write(12, 0);
+      DEV_GPIO_Mode(DEBUG_LED, GPIO_OUT);
+      DEV_Digital_Write(DEBUG_LED, 0);
     }
+
+  sd_initialized = sd_init_spi_mode();
 
   touch_screen_init();
 
@@ -241,12 +318,36 @@ int main(void)
       uint32_t now = to_ms_since_boot(get_absolute_time());
       bool timer_expired = (now - last_time > QUIET_AFTER*1000);
 
-      if (tenkey_pressed || actkey_pressed)
+      if (tenkey_pressed || actkey_pressed || macrokey_pressed)
 	last_time = now;
       if (!quiet_mode && timer_expired)
 	{
 	  quiet_mode = true;
 	  DEV_SET_PWM(40);
+	}
+      if (macrokey_pressed)
+	{
+	  macrokey_pressed = false;
+	  if (sd_initialized && sd_read_block(0, secbuf)) {
+#if 0
+	    //DEV_Digital_Write(DEBUG_LED, 1);
+	    printf("sector read ok\n");
+	    for (int i=0; i < 8; i++)
+	      printf("%02x ", secbuf[32+i]);
+	    printf("\n");
+#endif
+	    for (int i = 0; i < DEVKEY_LENGTH; i++)
+	      macro_codes[i] = secbuf[32+i] ^ __device_key__[i];
+	    //printf("macro len %d\n", macro_codes[0]);
+	    if (!macro_mode)
+	      {
+		macro_mode = true;
+		macro_length = macro_codes[0] % MAX_MACRO_LENGTH;
+		macro_index = 1;
+	      }
+	  }
+	  sd_initialized = false;
+	  sd_deselect();
 	}
       if (DEV_Digital_Read(SYS_OUT) == 0)
 	{
@@ -279,7 +380,7 @@ static void send_hid_report(bool keys_pressed)
 
     if (keys_pressed)
     {
-        tud_hid_keyboard_report(REPORT_ID_KEYBOARD, 0, key_codes);
+        tud_hid_keyboard_report(REPORT_ID_KEYBOARD, key_modifier, key_codes);
         send_empty = true;
     }
     else
@@ -317,9 +418,29 @@ void hid_task(bool quiet)
 
   if (!has_key)
     {
-      if (tenkey_pressed)
+      if (macro_mode)
+	{
+	  if (macro_index <= macro_length)
+	    {
+	      char c = macro_codes[macro_index] & 0x7f;
+	      key_codes[0] = asc2hidcode(c, &key_modifier);
+	      macro_index++;
+	      send_hid_report(quiet);
+	      has_key = true;
+	      //printf("macro key %02x\n", key_codes[0]);
+	    }
+	  else
+	    {
+	      macro_mode = false;
+	      macro_index = 0;
+	      // Erase macro_codes
+	      memset(macro_codes, 0, sizeof(macro_codes));
+	    }
+	}
+      else if (tenkey_pressed)
 	{
 	  key_codes[0] = (tenkey_id == 0)?HID_KEY_0:HID_KEY_1+tenkey_id-1;
+	  key_modifier = 0;
 	  tenkey_pressed = false;
 	  send_hid_report(quiet);
 	  has_key = true;
@@ -327,6 +448,7 @@ void hid_task(bool quiet)
       else if (actkey_pressed)
 	{
 	  key_codes[0] = actkey_id;
+	  key_modifier = 0;
 	  actkey_pressed = false;
 	  // send a keyboard report
 	  send_hid_report(quiet);
