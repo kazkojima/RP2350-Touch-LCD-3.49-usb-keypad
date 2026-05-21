@@ -147,8 +147,7 @@ Info:
 ******************************************************************************/
 UBYTE DEV_Module_Init(void)
 {
-    stdio_init_all();   
-    sleep_ms(100);
+    sleep_ms(50);
 
     // Increase core voltage to stabilize overclocking
     vreg_set_voltage(VREG_VOLTAGE_1_20);
@@ -162,6 +161,10 @@ UBYTE DEV_Module_Init(void)
         PLL_SYS_KHZ * 1000,                               
         PLL_SYS_KHZ * 1000                              
     );
+
+    sleep_ms(10);
+
+    stdio_init_all();
 
     //GPIO
     DEV_GPIO_Init();
