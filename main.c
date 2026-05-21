@@ -339,6 +339,8 @@ int main(void)
 	    for (int i = 0; i < DEVKEY_LENGTH; i++)
 	      macro_codes[i] = secbuf[32+i] ^ __device_key__[i];
 	    //printf("macro len %d\n", macro_codes[0]);
+	    // Erase sector buffer
+	    memset(secbuf, 0, sizeof(secbuf));
 	    if (!macro_mode)
 	      {
 		macro_mode = true;
