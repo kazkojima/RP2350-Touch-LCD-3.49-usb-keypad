@@ -61,6 +61,11 @@
 #define DEV_SCL_PIN   7
 #define DOF_INT1      8
 
+#define SD_CS_PIN 31
+#define SD_SCK_PIN 26
+#define SD_MOSI_PIN 27
+#define SD_MISO_PIN 28
+
 #define TOUCH_SDA_PIN 32
 #define TOUCH_SCL_PIN 33
 #define TOUCH_INT_PIN 11
