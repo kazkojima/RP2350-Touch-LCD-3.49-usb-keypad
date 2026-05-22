@@ -390,6 +390,9 @@ int main(void)
 	actkey_pressed = false;
       tud_task();
     }
+  // pin_value is used as the bit offset in __device_key__ section which is assumed
+  // the last 4096-byte block of flash memory.  Make sure < (4096-32-1)*8.
+  pin_value = pin_value % 10000;
   pin_prompt = false;
   //printf("pin value: %d\n", pin_value);
 #endif
