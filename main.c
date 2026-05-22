@@ -51,11 +51,14 @@
 #define ENABLE_QUIET_MODE 1
 #define QUIET_AFTER 60
 
-const int DEBUG_LED = -1; // 14
-#define ALLOW_DEBUG_LED (DEBUG_LED >= 0)
-
 // if 0, disable one time macro key function
 #define ENABLE_MACRO_KEY 1
+
+// if 1, enable PIN in macro key generation
+#define ENABLE_PIN_KEY 1 
+
+const int DEBUG_LED = -1; // 14
+#define ALLOW_DEBUG_LED (DEBUG_LED >= 0)
 
 // SDC objects
 static bool sd_initialized = false;
@@ -171,6 +174,13 @@ static void macrokey_event_handler(lv_event_t *e)
   }
 }
 
+#if ENABLE_PIN_KEY
+lv_obj_t *pin_prompt_widget;
+#define PIN_PROMPT_X 568
+#define PIN_PROMPT_Y 113
+bool pin_prompt = true;
+#endif
+
 void ui_init(lv_obj_t *parent)
 {
   lv_obj_t * btnm = lv_buttonmatrix_create(parent);
@@ -204,6 +214,23 @@ void ui_init(lv_obj_t *parent)
   lv_label_set_text(label, k->sym);
   lv_obj_center(label);
   macrokey_widget = btn;
+
+#if ENABLE_PIN_KEY
+  static lv_style_t style_label_bg;
+  lv_style_init(&style_label_bg);
+  lv_style_set_bg_opa(&style_label_bg, (255 * 100 / 100));
+  //lv_style_set_radius(&style_label_bg, 6);
+  lv_style_set_text_color(&style_label_bg, lv_palette_main(LV_PALETTE_BLUE_GREY));
+
+  label = lv_label_create(parent);
+  lv_obj_set_width(label, 66);
+  lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(label, LV_ALIGN_TOP_LEFT, PIN_PROMPT_X, PIN_PROMPT_Y);
+  lv_obj_set_style_bg_color(label, lv_color_hex(0xd5f5e3), 0);
+  lv_label_set_text(label, "PIN");
+  lv_obj_add_style(label, &style_label_bg, 0);
+  pin_prompt_widget = label;
+#endif
 }
 
 void ui_update_all(void)
@@ -267,6 +294,21 @@ static void core1_worker()
 	  if (!lv_obj_has_state(macrokey_widget, LV_STATE_DISABLED))
 	    lv_obj_add_state(macrokey_widget, LV_STATE_DISABLED);
 	}
+      else
+	{
+	  if (lv_obj_has_state(macrokey_widget, LV_STATE_DISABLED))
+	    lv_obj_remove_state(macrokey_widget, LV_STATE_DISABLED);
+	}
+#if ENABLE_PIN_KEY
+      static bool last_pin_prompt = true;
+      if (!pin_prompt && last_pin_prompt)
+	{
+	  lv_label_set_text(pin_prompt_widget, LV_SYMBOL_OK);
+	  lv_obj_invalidate(pin_prompt_widget);
+	  printf("hide prompt\n");
+	}
+      last_pin_prompt = pin_prompt;
+#endif
     }
 }
 
@@ -279,6 +321,10 @@ static bool macro_mode = false;
 static int macro_length = 0;
 static uint8_t macro_codes[MAX_MACRO_LENGTH]; // = { 6, 'H', 'e', 'l', 'l', 'o', '\n', };
 static int macro_index = 0;
+
+#define MAX_PIN_COUNT 4
+static int pin_count = 0;
+static size_t pin_value = 0;
 
 // simple ascii to hid key code converter
 uint8_t const conv_table[128][2] =  { HID_ASCII_TO_KEYCODE };
@@ -294,6 +340,15 @@ static inline uint8_t asc2hidcode(char c, hid_keyboard_modifier_bm_t *m)
 
 // start address of key code section on flash
 extern uint8_t __device_key__[];
+
+static inline uint8_t device_key(size_t index)
+{
+  size_t ofs, bit_ofs;
+  ofs = index + (pin_value >> 3);
+  bit_ofs = pin_value & 7;
+
+  return (__device_key__[ofs] >> bit_ofs) | (__device_key__[ofs+1] << (8-bit_ofs));
+}
 #endif
 
 /*------------- MAIN -------------*/
@@ -315,15 +370,34 @@ int main(void)
       DEV_Digital_Write(DEBUG_LED, 0);
     }
 
-#if ENABLE_MACRO_KEY
-    sd_initialized = sd_init_spi_mode();
-#endif
-
   touch_screen_init();
 
   tusb_init();
 
   multicore_launch_core1(core1_worker);
+
+#if ENABLE_PIN_KEY
+  while (pin_count < MAX_PIN_COUNT)
+    {
+      if (tenkey_pressed)
+	{
+	  tenkey_pressed = false;
+	  pin_value = pin_value*10 + tenkey_id;
+	  pin_count++;
+	}
+      // Ignore act keys
+      if (actkey_pressed)
+	actkey_pressed = false;
+      tud_task();
+    }
+  pin_prompt = false;
+  //printf("pin value: %d\n", pin_value);
+#endif
+
+#if ENABLE_MACRO_KEY
+    sd_initialized = sd_init_spi_mode();
+#endif
+
 
   bool quiet_mode = false;
   uint32_t last_time =  to_ms_since_boot(get_absolute_time());
@@ -353,7 +427,7 @@ int main(void)
 	  macrokey_pressed = false;
 	  if (sd_initialized && sd_read_block(0, secbuf)) {
 	    for (int i = 0; i < DEVKEY_LENGTH; i++)
-	      macro_codes[i] = secbuf[SECTOR_DATA_OFS+i] ^ __device_key__[i];
+	      macro_codes[i] = secbuf[SECTOR_DATA_OFS+i] ^ device_key(i);
 	    //printf("macro len %d\n", macro_codes[0]);
 	    // Erase sector buffer
 	    memset(secbuf, 0, sizeof(secbuf));
@@ -406,7 +480,7 @@ static void send_hid_report(bool keys_pressed)
     }
 }
 
-void hid_task(bool quiet)
+void hid_task(bool genkey)
 {
   const uint32_t interval_ms = 100;
   static uint32_t last_ms = 0;
@@ -438,7 +512,7 @@ void hid_task(bool quiet)
 	      char c = macro_codes[macro_index] & 0x7f;
 	      key_codes[0] = asc2hidcode(c, &key_modifier);
 	      macro_index++;
-	      send_hid_report(quiet);
+	      send_hid_report(genkey);
 	      has_key = true;
 	      //printf("macro key %02x\n", key_codes[0]);
 	    }
@@ -457,7 +531,7 @@ void hid_task(bool quiet)
 	  key_codes[0] = (tenkey_id == 0)?HID_KEY_0:HID_KEY_1+tenkey_id-1;
 	  key_modifier = 0;
 	  tenkey_pressed = false;
-	  send_hid_report(quiet);
+	  send_hid_report(genkey);
 	  has_key = true;
 	}
       else if (actkey_pressed)
@@ -466,7 +540,7 @@ void hid_task(bool quiet)
 	  key_modifier = 0;
 	  actkey_pressed = false;
 	  // send a keyboard report
-	  send_hid_report(quiet);
+	  send_hid_report(genkey);
 	  has_key = true;
 	}
     }
