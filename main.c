@@ -383,27 +383,6 @@ int main(void)
 
   multicore_launch_core1(core1_worker);
 
-#if 0
-  while (pin_count < MAX_PIN_COUNT)
-    {
-      if (tenkey_pressed)
-	{
-	  tenkey_pressed = false;
-	  pin_value = pin_value*10 + tenkey_id;
-	  pin_count++;
-	}
-      // Ignore act keys
-      if (actkey_pressed)
-	actkey_pressed = false;
-      tud_task();
-    }
-  // pin_value is used as the bit offset in __device_key__ section which is assumed
-  // the last 4096-byte block of flash memory.  Make sure < (4096-32-1)*8.
-  pin_value = pin_value % 10000;
-  pin_prompt = false;
-  //printf("pin value: %d\n", pin_value);
-#endif
-
 #if ENABLE_MACRO_KEY
     sd_initialized = sd_init_spi_mode();
 #endif
@@ -431,6 +410,8 @@ int main(void)
 	}
 #endif
 #if ENABLE_MACRO_KEY
+       if (quiet_mode && macrokey_pressed)
+	   macrokey_pressed = false;
        if (macrokey_pressed)
 	{
 	  macrokey_pressed = false;
