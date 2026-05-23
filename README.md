@@ -76,3 +76,41 @@ If there is no key activity for 60 seconds, the device will enter quiet mode. In
 #define QUIET_AFTER 60
 ```
 in main.c.
+
+## Experimental Features
+
+- **Macro key**: The macro key function acts as a simple "physical key" emulator. It combines data stored on an SD card with secret keys stored in the microcontroller's flash memory to "type" a pre-defined sequence of characters over USB.  It works in the steps below:
+
+  1. Trigger and Authentication
+    - Activation: The process begins when the user clicks the macro key widget (represented by LV_SYMBOL_UPLOAD) on the touch screen.
+    - PIN Entry: If ENABLE_PIN_KEY is enabled, the system prompts the user for a 4-digit PIN via the on-screen numeric keypad. This PIN is not just a password; it is used as a bit-offset (pin_value) to select a specific starting point within the secret key data stored in flash.
+  2. Data Retrieval and Decryption
+    - Physical Token (SD Card): The system attempts to read Sector 0 (the MBR) of an inserted SD card. It targets a specific offset (SECTOR_DATA_OFS, which is 32) to find the encrypted macro data.
+    - The "Secret" (Flash Memory): It references a section of the RP2350's flash memory labeled __device_key__.
+    - XOR Transformation: The function retrieves 32 bytes from the SD card and XORs them with bytes derived from the flash memory. The specific bits pulled from flash are determined by the user-entered PIN.
+    - Result: The resulting macro_codes buffer contains the raw ASCII sequence to be typed. The first byte defines the length of the macro.
+  3. USB HID Emulation
+    - Typing Task: Once the data is decrypted, the macro_mode flag is set. The hid_task (running in the main loop) iterates through the macro_codes buffer.
+    - Conversion: Each ASCII character is converted to a USB HID keycode using a conversion table (conv_table).
+    - Transmission: The characters are sent sequentially to the host PC as keyboard reports via the TinyUSB stack, effectively "typing" the password or command string.
+  4. Security and Cleanup
+    - One-Time Use: If ENABLE_MACRO_ONETIME is set, the SD card is programmatically deselected after one execution to prevent immediate re-use.
+    - Memory Wiping: After the macro finishes typing, the macro_codes and secbuf (the SD sector buffer) are explicitly zeroed out using memset to prevent sensitive data from lingering in RAM.
+
+  For setup, an external application prepares 4096 random bytes which will be written to the flash page and generates a key which will be written into the SD card based on the user-specified plain text and pin-value. Here is a pseudo code of that application:
+
+```
+  uint8_t randoms[4096]; // Read from /dev/random, for example.
+  size_t bit_ofs = user_specified_PIN_value; // <= 9999
+  uint8_t user_text_with_length[32]; // = { 6, 'H', 'e', 'l', 'l', 'o', '\n', };
+  uint8_t key_on_sdcard[32];
+  for (int i=0; i < 32; i++) {
+    size_t byte_ofs = i + (bit_ofs >> 3);
+    size_t ofs_in_byte = bit_ofs & 7;
+    uint8_t key;
+    key = randoms[byte_ofs] >> ofs_in_byte) | (randoms[byte_ofs+1] << (8-ofs_in_byte));
+    key_on_sdcard[i] = user_text_with_length[i] ^ key;
+  }
+  // write randoms to a file
+  // write key_on_sdcard to a file
+```
