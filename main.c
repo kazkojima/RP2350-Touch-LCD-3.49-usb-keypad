@@ -364,13 +364,6 @@ int main(void)
   if (DEV_Module_Init() != 0)
     return -1;
 
-#if 0
-  printf("device key address %08x\n", __device_key__);
-  for (int i=0; i < 8; i++)
-    printf("%02x ", __device_key__[i]);
-  printf("\n");
-#endif
-
   if (ALLOW_DEBUG_LED)
     {
       DEV_GPIO_Mode(DEBUG_LED, GPIO_OUT);
@@ -394,8 +387,17 @@ int main(void)
 #if ENABLE_QUIET_MODE
       uint32_t now = to_ms_since_boot(get_absolute_time());
       bool timer_expired = (now - last_time > QUIET_AFTER*1000);
+      bool activity;
 
-      if (tenkey_pressed || actkey_pressed || macrokey_pressed)
+      activity = tenkey_pressed || actkey_pressed || macrokey_pressed;
+# if ENABLE_MACRO_KEY
+      activity = activity || macro_mode;
+# endif
+# if ENABLE_PIN_KEY
+      activity = activity || pin_prompt;
+# endif
+
+      if (activity)
 	last_time = now;
       if (!quiet_mode && timer_expired)
 	{
@@ -406,13 +408,14 @@ int main(void)
 	{
 	  last_time = now;
 	  quiet_mode = false;
+# if ENABLE_MACRO_KEY
+	  macrokey_pressed = false;
+# endif
 	  DEV_SET_PWM(60);
 	}
 #endif
 #if ENABLE_MACRO_KEY
-       if (quiet_mode && macrokey_pressed)
-	   macrokey_pressed = false;
-       if (macrokey_pressed)
+       if (!quiet_mode && macrokey_pressed)
 	{
 	  macrokey_pressed = false;
 # if ENABLE_PIN_KEY
