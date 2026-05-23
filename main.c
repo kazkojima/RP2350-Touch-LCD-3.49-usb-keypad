@@ -51,8 +51,11 @@
 #define ENABLE_QUIET_MODE 1
 #define QUIET_AFTER 60
 
-// if 0, disable one time macro key function
+// if 0, disable macro key function
 #define ENABLE_MACRO_KEY 1
+
+// if 1, macro key is enabled at the first time only
+#define ENABLE_MACRO_ONETIME 0
 
 // if 1, enable PIN in macro key generation
 #define ENABLE_PIN_KEY 1 
@@ -178,7 +181,7 @@ static void macrokey_event_handler(lv_event_t *e)
 lv_obj_t *pin_prompt_widget;
 #define PIN_PROMPT_X 568
 #define PIN_PROMPT_Y 113
-bool pin_prompt = true;
+bool pin_prompt = false;
 #endif
 
 void ui_init(lv_obj_t *parent)
@@ -227,8 +230,9 @@ void ui_init(lv_obj_t *parent)
   lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
   lv_obj_align(label, LV_ALIGN_TOP_LEFT, PIN_PROMPT_X, PIN_PROMPT_Y);
   lv_obj_set_style_bg_color(label, lv_color_hex(0xd5f5e3), 0);
-  lv_label_set_text(label, "PIN");
+  lv_label_set_text(label, "PIN?");
   lv_obj_add_style(label, &style_label_bg, 0);
+  lv_obj_add_flag(label, LV_OBJ_FLAG_HIDDEN);
   pin_prompt_widget = label;
 #endif
 }
@@ -300,12 +304,15 @@ static void core1_worker()
 	    lv_obj_remove_state(macrokey_widget, LV_STATE_DISABLED);
 	}
 #if ENABLE_PIN_KEY
-      static bool last_pin_prompt = true;
-      if (!pin_prompt && last_pin_prompt)
+      static bool last_pin_prompt = false;
+      if (pin_prompt != last_pin_prompt)
 	{
-	  lv_label_set_text(pin_prompt_widget, LV_SYMBOL_OK);
+	  if (pin_prompt)
+	    lv_obj_remove_flag(pin_prompt_widget, LV_OBJ_FLAG_HIDDEN);
+	  else
+	    lv_obj_add_flag(pin_prompt_widget, LV_OBJ_FLAG_HIDDEN);
 	  lv_obj_invalidate(pin_prompt_widget);
-	  printf("hide prompt\n");
+	  //printf("hide prompt\n");
 	}
       last_pin_prompt = pin_prompt;
 #endif
@@ -376,7 +383,7 @@ int main(void)
 
   multicore_launch_core1(core1_worker);
 
-#if ENABLE_PIN_KEY
+#if 0
   while (pin_count < MAX_PIN_COUNT)
     {
       if (tenkey_pressed)
@@ -400,7 +407,6 @@ int main(void)
 #if ENABLE_MACRO_KEY
     sd_initialized = sd_init_spi_mode();
 #endif
-
 
   bool quiet_mode = false;
   uint32_t last_time =  to_ms_since_boot(get_absolute_time());
@@ -428,22 +434,54 @@ int main(void)
        if (macrokey_pressed)
 	{
 	  macrokey_pressed = false;
+# if ENABLE_PIN_KEY
+	  pin_prompt = true;
+	}
+       if (pin_prompt)
+	 {
+	   if (pin_count < MAX_PIN_COUNT)
+	     {
+	       if (tenkey_pressed)
+		 {
+		   tenkey_pressed = false;
+		   pin_value = pin_value*10 + tenkey_id;
+		   pin_count++;
+		 }
+	       // Ignore act keys
+	       if (actkey_pressed)
+		 actkey_pressed = false;
+	       tud_task();
+	       continue;
+	     }
+
+	   // pin_value is used as the bit offset in __device_key__ section which
+	   // is assumed the last 4096-byte block of flash memory.
+	   // Make sure < (4096-32-1)*8.
+	   pin_value = pin_value % 10000;
+	   pin_prompt = false;
+	   //printf("pin value: %d\n", pin_value);
+# endif  // ENABLE_PIN_KEY
+	  
 	  if (sd_initialized && sd_read_block(0, secbuf)) {
 	    for (int i = 0; i < DEVKEY_LENGTH; i++)
 	      macro_codes[i] = secbuf[SECTOR_DATA_OFS+i] ^ device_key(i);
-	    //printf("macro len %d\n", macro_codes[0]);
+
+	    macro_length = macro_codes[0] & 0x1F; // Mask to MAX_MACRO_LENGTH (32)
+	    pin_count = 0;
+	    pin_value = 0;
 	    // Erase sector buffer
 	    memset(secbuf, 0, sizeof(secbuf));
 	    if (!macro_mode)
 	      {
 		macro_mode = true;
-		macro_length = macro_codes[0] % MAX_MACRO_LENGTH;
 		macro_index = 1;
 	      }
 	  }
+# if 	ENABLE_MACRO_ONETIME
 	  sd_initialized = false;
 	  sd_deselect();
-	}
+# endif
+	 }
 #endif
       tud_task();
       hid_task(!quiet_mode);
@@ -512,7 +550,7 @@ void hid_task(bool genkey)
 	{
 	  if (macro_index <= macro_length)
 	    {
-	      char c = macro_codes[macro_index] & 0x7f;
+	      uint8_t c = macro_codes[macro_index] & 0x7f;
 	      key_codes[0] = asc2hidcode(c, &key_modifier);
 	      macro_index++;
 	      send_hid_report(genkey);
